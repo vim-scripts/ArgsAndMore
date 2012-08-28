@@ -1,8 +1,10 @@
 " ArgsAndMore.vim: Apply commands to multiple buffers and manage the argument list.
 "
 " DEPENDENCIES:
+"   - escapings.vim autoload script
 "   - ingocollections.vim autoload script
 "   - ingofile.vim autoload script
+"   - ingofileargs.vim autoload script
 "   - ingosearch.vim autoload script
 "
 " Copyright: (C) 2012 Ingo Karkat
@@ -11,6 +13,12 @@
 " Maintainer:	Ingo Karkat <ingo@karkat.de>
 "
 " REVISION	DATE		REMARKS
+"   1.01.003	27-Aug-2012	Do not use <f-args> because of its unescaping
+"				behavior.
+"				FIX: "E480: No match" on :ArgsNegated with
+"				../other/path relative argument; need to issue a
+"				dummy :chdir to convert relative args before
+"				doing the :argdelete.
 "   1.00.002	30-Jul-2012	ENH: Implement :CListToArgs et al.
 "				ENH: Avoid the hit-enter prompt on :Argdo, do
 "				summary reporting. Add :ArgdoErrors and
@@ -327,20 +335,28 @@ function! ArgsAndMore#ArgsFilter( filterExpression )
     endif
 endfunction
 
-function! ArgsAndMore#ArgsNegated( bang, ... )
+function! ArgsAndMore#ArgsNegated( bang, filePatternsString )
+    let l:filePatterns = ingofileargs#SplitAndUnescapeArguments(a:filePatternsString)
+
     " First add all files in the passed directories, then remove the glob
     " matches. This allows to exclude multiple patterns from the same directory,
     " e.g. :ArgsNegated foo* bar*
-    let l:argDirspecGlobs = ingocollections#unique(map(copy(a:000), 'ingofile#CombineToFilespec(fnamemodify(v:val, ":h"), "*")'))
+    let l:argDirspecGlobs = ingocollections#unique(map(copy(l:filePatterns), 'ingofile#CombineToFilespec(fnamemodify(v:val, ":h"), "*")'))
     " The globs passed to :argdelete must match the format listed in :args, so
     " modify all passed globs to be relative to the CWD.
-    let l:argNegationGlobs = map(copy(a:000), 'fnamemodify(v:val, ":p:.")')
-
+    let l:argNegationGlobs = map(copy(l:filePatterns), 'fnamemodify(v:val, ":p:.")')
+"****D echomsg '****' string(l:argDirspecGlobs) string(l:argNegationGlobs)
     try
 	if argc() > 0
 	    silent! execute printf('1,%dargdelete', argc())
 	endif
 	execute 'argadd' join(l:argDirspecGlobs)
+
+	" XXX: Need to issue a dummy :chdir to convert relative args
+	" "../other/path" to a path relative to the CWD "/real/other/path".
+	let l:chdirCommand = (haslocaldir() ? 'lchdir!' : 'chdir!')
+	execute l:chdirCommand escapings#fnameescape(getcwd())
+
 	execute 'argdelete' join(l:argNegationGlobs)
 	execute 'first' . a:bang
     catch /^Vim\%((\a\+)\)\=:E/
@@ -355,10 +371,10 @@ endfunction
 
 
 
-function! ArgsAndMore#ArgsList( isBang, ... )
-    let l:isFullPath = (a:0 || a:isBang)
-    if a:0
-	let l:pattern = ingosearch#WildcardExprToSearchPattern(a:1, '')
+function! ArgsAndMore#ArgsList( isBang, fileglob )
+    let l:isFullPath = (! empty(a:fileglob) || a:isBang)
+    if ! empty(a:fileglob)
+	let l:pattern = ingosearch#WildcardExprToSearchPattern(a:fileglob, '')
     endif
 
     echohl Title
@@ -370,7 +386,7 @@ function! ArgsAndMore#ArgsList( isBang, ... )
 	if l:isFullPath
 	    let l:argFilespec = fnamemodify(l:argFilespec, ':p')
 	endif
-	if a:0 && (! a:isBang && l:argFilespec !~ l:pattern || a:isBang && l:argFilespec =~ l:pattern)
+	if ! empty(a:fileglob) && (! a:isBang && l:argFilespec !~ l:pattern || a:isBang && l:argFilespec =~ l:pattern)
 	    continue
 	endif
 
