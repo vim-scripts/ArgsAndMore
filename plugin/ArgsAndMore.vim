@@ -10,6 +10,14 @@
 " Maintainer:	Ingo Karkat <ingo@karkat.de>
 "
 " REVISION	DATE		REMARKS
+"   1.10.005	09-Sep-2012	Add g:ArgsAndMore_AfterCommand hook before
+"				buffer switching and use this by default to add
+"				a small delay, which allows for aborting an
+"				interactive :s///c substitution by pressing
+"				CTRL-C twice within the delay. Cp.
+"				http://stackoverflow.com/questions/12328007/in-vim-how-to-cancel-argdo
+"				Add :Bufdo command for completeness and to get
+"				the hook functionality.
 "   1.01.004	27-Aug-2012	Do not use <f-args> because of its unescaping
 "				behavior.
 "   1.00.003	30-Jul-2012	ENH: Implement :CListToArgs et al.
@@ -26,9 +34,19 @@ if exists('g:loaded_ArgsAndMore') || (v:version < 700)
 endif
 let g:loaded_ArgsAndMore = 1
 
+"- configuration ---------------------------------------------------------------
+
+if ! exists('g:ArgsAndMore_AfterCommand')
+    let g:ArgsAndMore_AfterCommand = 'sleep 100ms'
+endif
+
+
+"- commands --------------------------------------------------------------------
+
 " Note: No -bar for the :...do commands; they can take a sequence of Vim
 " commands.
 
+command! -nargs=1 -complete=command Bufdo    call ArgsAndMore#Bufdo(<q-args>)
 command! -nargs=1 -complete=command Windo    call ArgsAndMore#Windo(<q-args>)
 command! -nargs=1 -complete=command Winbufdo call ArgsAndMore#Winbufdo(<q-args>)
 command! -nargs=1 -complete=command Tabdo    call ArgsAndMore#Tabdo(<q-args>)

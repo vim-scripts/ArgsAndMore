@@ -14,6 +14,9 @@ RELATED WORKS
     http://stackoverflow.com/questions/11547662/how-can-i-negate-a-glob-in-vim
 
 USAGE
+:Bufdo {cmd}		Execute {cmd} in each buffer in the buffer list, then
+			return back to the original one.
+
 :Windo {cmd}            Execute {cmd} in each window, then return back to the
                         original one.
 
