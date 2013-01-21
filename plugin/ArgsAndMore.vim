@@ -37,7 +37,7 @@ let g:loaded_ArgsAndMore = 1
 "- configuration ---------------------------------------------------------------
 
 if ! exists('g:ArgsAndMore_AfterCommand')
-    let g:ArgsAndMore_AfterCommand = 'sleep 100ms'
+    let g:ArgsAndMore_AfterCommand = 'sleep 100m'
 endif
 
 
