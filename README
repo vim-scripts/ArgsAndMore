@@ -12,10 +12,17 @@ RELATED WORKS
 - The :ArgsNegated command was inspired by the following Stack Overflow
   question:
     http://stackoverflow.com/questions/11547662/how-can-i-negate-a-glob-in-vim
+- The https://github.com/nelstrom/vim-qargs plugin has a :Qargs command
+  similar (but more simplistic) than :CListToArgs.
 
 USAGE
-:Bufdo {cmd}		Execute {cmd} in each buffer in the buffer list, then
-			return back to the original one.
+:Bufdo {cmd}            Execute {cmd} in each buffer in the buffer list, then
+                        return back to the original one.
+                        Any encountered errors are also put into the
+                        quickfix list.
+
+:BufdoWrite {cmd}       Execute {cmd} in each buffer in the buffer list and
+                        automatically persist any changes (:update).
 
 :Windo {cmd}            Execute {cmd} in each window, then return back to the
                         original one.
@@ -32,7 +39,7 @@ USAGE
 
 :Argdo {cmd}            Execute {cmd} for each file in the argument list, then
                         return back to the original file and argument.
-:[range]Argdo {cmd}     Execute {cmd} for the [range] of indices from the
+:{range}Argdo {cmd}     Execute {cmd} for the {range} of indices from the
                         argument list, then return back to the original file
                         and argument.
                         For example, to execute {cmd} on the remaining
@@ -44,6 +51,11 @@ USAGE
                         summary will be printed.
                         To work on the errors / arguments with errors, you can
                         use :ArgdoErrors and :ArgdoDeleteSuccessful.
+                        Also, any encountered errors are put into the
+                        quickfix list.
+
+:ArgdoWrite {cmd}       Execute {cmd} in each buffer in the argument list and
+                        automatically persist any changes (:update).
 
 :ArgdoErrors            List all error messages that occurred during the last
                         :Argdo command, and for each unique error, print the
@@ -52,7 +64,6 @@ USAGE
 :ArgdoDeleteSuccessful  Delete those arguments from the argument list that
                         didn't cause any error messages during the last
                         :Argdo command.
-
 
 :ArgsFilter {expr}      Apply the filter() of {expr} to the argument list,
                         and keep only those where {expr} yields true. This
@@ -63,7 +74,6 @@ USAGE
                         Define all files except {arglist} as the new argument
                         list and edit the first one.
 
-
 :ArgsList[!]            List each argument number and filespec in a neat list
                         (not just one after the other as :args). With [!],
                         expand all arguments to absolute filespecs.
@@ -71,9 +81,7 @@ USAGE
                         (with [!]: does not match) {glob} in a neat list.
                         Matching and printing is done to the full filespec.
 
-
 :ArgsToQuickfix         Show all arguments as a quickfix list.
-
 
 :CListToArgs            Convert the files in the quickfix list to arguments.
 :[count]CListToArgsAdd

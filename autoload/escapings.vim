@@ -117,7 +117,7 @@ function! escapings#exescape( command )
 "* PURPOSE:
 "   Escape a shell command (potentially consisting of multiple commands and
 "   including (already quoted) command-line arguments) so that it can be used in
-"   ex commands. For example: 'hostname && ps -ef | grep -e "foo"'.
+"   Ex commands. For example: 'hostname && ps -ef | grep -e "foo"'.
 "
 "* ASSUMPTIONS / PRECONDITIONS:
 "	? List of any external variable, control, or other element whose state affects this procedure.
@@ -139,7 +139,7 @@ endfunction
 function! escapings#fnameescape( filespec )
 "*******************************************************************************
 "* PURPOSE:
-"   Escape a normal filespec syntax so that it can be used in ex commands.
+"   Escape a normal filespec syntax so that it can be used in Ex commands.
 "* ASSUMPTIONS / PRECONDITIONS:
 "	? List of any external variable, control, or other element whose state affects this procedure.
 "* EFFECTS / POSTCONDITIONS:
@@ -147,7 +147,7 @@ function! escapings#fnameescape( filespec )
 "* INPUTS:
 "   a:filespec	    normal filespec
 "* RETURN VALUES:
-"   Escaped filespec to be passed as a {file} argument to an ex command.
+"   Escaped filespec to be passed as a {file} argument to an Ex command.
 "*******************************************************************************
     if exists('*fnameescape')
 	return fnameescape(a:filespec)
@@ -162,9 +162,9 @@ function! escapings#fnameunescape( exfilespec, ... )
 "*******************************************************************************
 "* PURPOSE:
 "   Converts the passed a:exfilespec to the normal filespec syntax (i.e. no
-"   escaping of ex special chars like [%#]). The normal syntax is required by
+"   escaping of Ex special chars like [%#]). The normal syntax is required by
 "   Vim functions such as filereadable(), because they do not understand the
-"   escaping for ex commands.
+"   escaping for Ex commands.
 "   Note: On Windows, fnamemodify() doesn't convert path separators to
 "   backslashes. We don't force that neither, as forward slashes work just as
 "   well and there is even less potential for problems.
@@ -173,7 +173,7 @@ function! escapings#fnameunescape( exfilespec, ... )
 "* EFFECTS / POSTCONDITIONS:
 "	? List of the procedure's effect on each external variable, control, or other element.
 "* INPUTS:
-"   a:exfilespec    Escaped filespec to be passed as a {file} argument to an ex
+"   a:exfilespec    Escaped filespec to be passed as a {file} argument to an Ex
 "		    command.
 "   a:isMakeFullPath	Flag whether the filespec should also be expanded to a
 "			full path, or kept in whatever form it currently is.

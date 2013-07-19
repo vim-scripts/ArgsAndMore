@@ -10,6 +10,16 @@
 " Maintainer:	Ingo Karkat <ingo@karkat.de>
 "
 " REVISION	DATE		REMARKS
+"   1.20.008	21-Apr-2013	Change -range=-1 default check to use <count>,
+"				which maintains the actual -1 default, and
+"				therefore also delivers correct results when on
+"				line 1.
+"   1.20.007	09-Apr-2013	ENH: Add :ArgdoWrite and :BufdoWrite variants
+"				that also perform an automatic :update.
+"   1.12.006	15-Mar-2013	Avoid script errors when using :Argdo 3s/foo/bar
+"				by using -range=-1 instead of -count=0 (which
+"				parses a number from the leading argument) as
+"				the test for a passed range.
 "   1.10.005	09-Sep-2012	Add g:ArgsAndMore_AfterCommand hook before
 "				buffer switching and use this by default to add
 "				a small delay, which allows for aborting an
@@ -39,6 +49,9 @@ let g:loaded_ArgsAndMore = 1
 if ! exists('g:ArgsAndMore_AfterCommand')
     let g:ArgsAndMore_AfterCommand = 'sleep 100m'
 endif
+if ! exists('g:ArgsAndMore_InteractiveCommandPattern')
+    let g:ArgsAndMore_InteractiveCommandPattern = 's\%[ubstitute]\(\i\@!\S\).*\1\%([egiInp#lr]\)*c'
+endif
 
 
 "- commands --------------------------------------------------------------------
@@ -46,20 +59,22 @@ endif
 " Note: No -bar for the :...do commands; they can take a sequence of Vim
 " commands.
 
-command! -nargs=1 -complete=command Bufdo    call ArgsAndMore#Bufdo(<q-args>)
-command! -nargs=1 -complete=command Windo    call ArgsAndMore#Windo(<q-args>)
-command! -nargs=1 -complete=command Winbufdo call ArgsAndMore#Winbufdo(<q-args>)
-command! -nargs=1 -complete=command Tabdo    call ArgsAndMore#Tabdo(<q-args>)
-command! -nargs=1 -complete=command Tabwindo call ArgsAndMore#Tabwindo(<q-args>)
+command! -nargs=1 -complete=command Bufdo       call ArgsAndMore#Bufdo(<q-args>, '')
+command! -nargs=1 -complete=command BufdoWrite  call ArgsAndMore#Bufdo(<q-args>, 'update')
+command! -nargs=1 -complete=command Windo       call ArgsAndMore#Windo(<q-args>)
+command! -nargs=1 -complete=command Winbufdo    call ArgsAndMore#Winbufdo(<q-args>)
+command! -nargs=1 -complete=command Tabdo       call ArgsAndMore#Tabdo(<q-args>)
+command! -nargs=1 -complete=command Tabwindo    call ArgsAndMore#Tabwindo(<q-args>)
 
 
 " Note: No -bar; can take a sequence of Vim commands.
 " Note: Cannot use -range and <line1>, <line2>, because in them, identifiers
 " like ".+1" and "$" are translated into buffer line numbers, and we need
-" argument indices! Instead, use -count=0 as a marker, and extract the original
+" argument indices! Instead, use -range=-1 as a marker, and extract the original
 " range from the command history. (This means that we can only use the command
 " interactively, not in a script.)
-command! -count=0 -nargs=1 -complete=command Argdo call ArgsAndMore#ArgdoWrapper(<count>, <q-args>)
+command! -range=-1 -nargs=1 -complete=command Argdo      call ArgsAndMore#ArgdoWrapper((<count> == -1), <q-args>, '')
+command! -range=-1 -nargs=1 -complete=command ArgdoWrite call ArgsAndMore#ArgdoWrapper((<count> == -1), <q-args>, 'update')
 command! -bar ArgdoErrors call ArgsAndMore#ArgdoErrors()
 command! -bar ArgdoDeleteSuccessful call ArgsAndMore#ArgdoDeleteSuccessful()
 

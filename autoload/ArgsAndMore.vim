@@ -2,10 +2,11 @@
 "
 " DEPENDENCIES:
 "   - escapings.vim autoload script
-"   - ingocollections.vim autoload script
-"   - ingofile.vim autoload script
-"   - ingofileargs.vim autoload script
-"   - ingosearch.vim autoload script
+"   - ingo/cmdargs/file.vim autoload script
+"   - ingo/collections.vim autoload script
+"   - ingo/fs/path.vim autoload script
+"   - ingo/msg.vim autoload script
+"   - ingo/regexp.vim autoload script
 "
 " Copyright: (C) 2012-2013 Ingo Karkat
 "   The VIM LICENSE applies to this script; see ':help copyright'.
@@ -13,6 +14,28 @@
 " Maintainer:	Ingo Karkat <ingo@karkat.de>
 "
 " REVISION	DATE		REMARKS
+"   1.20.011	14-Jun-2013	Minor: Make matchstr() robust against
+"				'ignorecase'.
+"   1.20.010	01-Jun-2013	ENH: Enable syntax highlighting on :Argdo /
+"				:Bufdo on freshly loaded buffers when the
+"				command is an interactive one (:s///c, according
+"				to g:ArgsAndMore_InteractiveCommandPattern), but
+"				for performance reasons not in the general case.
+"				In :{range}Argdo, emulate the behavior of the
+"				built-in :argdo to disable syntax highlighting
+"				during to speed up the iteration, but consider
+"				our own enhancement, the exception for
+"				interactive commands.
+"			    	Move ingofile.vim into ingo-library.
+"   			    	Move ingofileargs.vim into ingo-library.
+"   1.20.009	24-May-2013	Move ingosearch.vim to ingo-library.
+"   1.20.008	09-Apr-2013	ENH: Allow postCommand execute for :Argdo and
+"				:Bufdo.
+"   1.12.007	15-Mar-2013	Use ingo/msg.vim error functions. Obsolete
+"				s:ErrorMsg() and s:MsgFromException().
+"				ENH: Add errors from :Argdo and :BufDo to the
+"				quickfix list to allow easier rework.
+"   1.12.006	21-Feb-2013	Move ingocollections.vim to ingo-library.
 "   1.11.005	15-Jan-2013	FIX: Factor out s:sort() and also use numerical
 "				sort in the one missed case.
 "   1.10.004	09-Sep-2012	Factor out common try..execute..catch into
@@ -34,24 +57,11 @@
 "				ENH: Restore the argument index in addition to
 "				the current file on :Argdo.
 "	001	29-Jul-2012	file creation from ingocommands.vim
-
-function! s:ErrorMsg( text )
-    let v:errmsg = a:text
-    echohl ErrorMsg
-    echomsg v:errmsg
-    echohl None
-endfunction
-function! s:MsgFromException( exception )
-    " v:exception contains what is normally in v:errmsg, but with extra
-    " exception source info prepended, which we cut away.
-    return substitute(a:exception, '^Vim\%((\a\+)\)\=:', '', '')
-endfunction
-function! s:ExceptionMsg( exception )
-    call s:ErrorMsg(s:MsgFromException(a:exception))
-endfunction
+let s:save_cpo = &cpo
+set cpo&vim
 
 function! s:sort( list )
-    return sort(a:list, 'ingocollections#numsort')
+    return sort(a:list, 'ingo#collections#numsort')
 endfunction
 
 function! s:AfterExecute()
@@ -61,7 +71,7 @@ function! s:Execute( command )
     try
 	execute a:command
     catch /^Vim\%((\a\+)\)\=:E/
-	call s:ExceptionMsg(v:exception)
+	call ingo#msg#VimExceptionMsg()
     endtry
 
     call s:AfterExecute()
@@ -125,21 +135,77 @@ function! s:ArgumentListRestoreCommand()
     return l:restoreCommand
 endfunction
 let s:errors = []
-function! s:ArgExecute( command )
+function! s:ErrorToQuickfixEntry( error )
+    let l:entry = {'bufnr': a:error[1], 'text': a:error[2]}
+    if len(a:error) >= 4
+	let l:entry.lnum = a:error[3]
+    endif
+    if len(a:error) >= 5
+	let l:entry.col = a:error[4]
+    endif
+    return l:entry
+endfunction
+function! s:ErrorsToQuickfix( command )
+    if len(s:errors) == 0
+	return
+    endif
+
+    silent execute 'doautocmd QuickFixCmdPre' a:command | " Allow hooking into the quickfix update.
+	call setqflist(map(copy(s:errors), "s:ErrorToQuickfixEntry(v:val)"))
+    silent execute 'doautocmd QuickFixCmdPost' a:command | " Allow hooking into the quickfix update.
+endfunction
+function! s:IsInteractiveCommand( command )
+    return (! empty(g:ArgsAndMore_InteractiveCommandPattern) && a:command =~# g:ArgsAndMore_InteractiveCommandPattern)
+endfunction
+function! s:IsSyntaxSuppressed()
+    return (index(split(&eventignore, ','), 'Syntax') != -1)
+endfunction
+function! s:EnableSyntaxHighlightingForInteractiveCommands( command )
+"****D echomsg '****' exists('g:syntax_on') exists('b:current_syntax') string(&l:filetype) string(&l:buftype) index(split(&eventignore, ','), 'Syntax')
+    " Note: Some plugins set up scratch windows with a custom filetype, but
+    " don't set b:current_syntax. To avoid clearing their custom highlightings
+    " when processing their buffer, we try to detect them via 'buftype'.
+    if
+    \   exists('g:syntax_on') &&
+    \   ! exists('b:current_syntax') &&
+    \   ! empty(&l:filetype) &&
+    \   &l:buftype !=# 'nofile' &&
+    \   s:IsSyntaxSuppressed()
+	let l:save_eventignore = &eventignore
+	set eventignore-=Syntax
+	try
+	    set syntax=ON
+	finally
+	    let &eventignore = l:save_eventignore
+	endtry
+    endif
+endfunction
+function! s:ArgExecute( command, postCommand, isEnableSyntax )
+    if a:isEnableSyntax
+	call s:EnableSyntaxHighlightingForInteractiveCommands(a:command)
+    endif
+
     try
 	let v:errmsg = ''
 	execute a:command
 	if ! empty(v:errmsg)
-	    call add(s:errors, [argidx(), bufnr(''), v:errmsg])
+	    call add(s:errors, [argidx(), bufnr(''), v:errmsg, line('.'), col('.')])
+	endif
+	if ! empty(a:postCommand)
+	    let v:errmsg = ''
+	    execute a:postCommand
+	    if ! empty(v:errmsg)
+		call add(s:errors, [argidx(), bufnr(''), v:errmsg, line('.'), col('.')])
+	    endif
 	endif
     catch /^Vim\%((\a\+)\)\=:E/
-	call add(s:errors, [argidx(), bufnr(''), s:MsgFromException(v:exception)])
-	call s:ExceptionMsg(v:exception)
+	call add(s:errors, [argidx(), bufnr(''), ingo#msg#MsgFromVimException(), line('.'), col('.')])
+	call ingo#msg#VimExceptionMsg()
     endtry
 
     call s:AfterExecute()
 endfunction
-function! s:Argdo( command )
+function! s:Argdo( command, postCommand )
     let l:restoreCommand = s:ArgumentListRestoreCommand()
 
     " Temporarily turn off 'more', as this interferes with the "automated batch
@@ -163,29 +229,39 @@ function! s:Argdo( command )
 	" Individual commands need to be enclosed in try..catch, or the :argdo
 	" iteration will be aborted. (We can't use :silent! because we want to
 	" see the error message.)
-	argdo call s:ArgExecute(a:command)
+	let l:isEnableSyntax = s:IsInteractiveCommand(a:command)
+	argdo call s:ArgExecute(a:command, a:postCommand, l:isEnableSyntax)
     catch /^Vim\%((\a\+)\)\=:E/
-	call add(s:errors, [argidx(), bufnr(''), s:MsgFromException(v:exception)])
-	call s:ExceptionMsg(v:exception)
+	call add(s:errors, [argidx(), bufnr(''), ingo#msg#MsgFromVimException()])
+	call ingo#msg#VimExceptionMsg()
     endtry
 
     silent! execute l:restoreCommand
 
+    call s:ErrorsToQuickfix('argdo')
     if len(s:errors) == 1
-	call s:ErrorMsg(printf('%d %s: %s', (s:errors[0][0] + 1), bufname(s:errors[0][1]), s:errors[0][2]))
+	call ingo#msg#ErrorMsg(printf('%d %s: %s', (s:errors[0][0] + 1), bufname(s:errors[0][1]), s:errors[0][2]))
     elseif len(s:errors) > 1
-	let l:argumentNumbers = s:sort(ingocollections#unique(map(copy(s:errors), 'v:val[0] + 1')))
-	call s:ErrorMsg(printf('%d error%s in argument%s %s', len(s:errors), (len(s:errors) == 1 ? '' : 's'), (len(l:argumentNumbers) == 1 ? '' : 's'), join(l:argumentNumbers, ', ')))
+	let l:argumentNumbers = s:sort(ingo#collections#Unique(map(copy(s:errors), 'v:val[0] + 1')))
+	call ingo#msg#ErrorMsg(printf('%d error%s in argument%s %s', len(s:errors), (len(s:errors) == 1 ? '' : 's'), (len(l:argumentNumbers) == 1 ? '' : 's'), join(l:argumentNumbers, ', ')))
     endif
 
     " To avoid a hit-enter prompt, we have to restore this _after_ the summary
     " error message.
     let &more = l:save_more
 endfunction
-function! s:ArgIterate( startIdx, endIdx, command )
+function! s:ArgIterate( startIdx, endIdx, command, postCommand )
     " Structure here like in s:Argdo().
 
     let l:restoreCommand = s:ArgumentListRestoreCommand()
+
+    if ! s:IsInteractiveCommand(a:command) && ! s:IsSyntaxSuppressed()
+	" Emulate the behavior of the built-in :argdo to disable syntax
+	" highlighting during to speed up the iteration, but consider our own
+	" enhancement, the exception for interactive commands.
+	let l:undoSuppressSyntax = 1
+	set eventignore+=Syntax
+    endif
 
     let l:save_more = &more
     set nomore
@@ -208,20 +284,25 @@ function! s:ArgIterate( startIdx, endIdx, command )
 		echo l:nextArgumentOutput
 	    endif
 
-	    call s:ArgExecute(a:command)
+	    call s:ArgExecute(a:command, a:postCommand, 0)  " Without :argdo, we control the syntax suppression; no need to enable syntax during iteration.
 	endfor
     catch /^Vim\%((\a\+)\)\=:E/
-	call add(s:errors, [argidx(), bufnr(''), s:MsgFromException(v:exception)])
-	call s:ExceptionMsg(v:exception)
+	call add(s:errors, [argidx(), bufnr(''), ingo#msg#MsgFromVimException()])
+	call ingo#msg#VimExceptionMsg()
+    finally
+	if exists('l:undoSuppressSyntax')
+	    set eventignore-=Syntax
+	endif
     endtry
 
     silent! execute l:restoreCommand
 
+    call s:ErrorsToQuickfix('argdo')
     if len(s:errors) == 1
-	call s:ErrorMsg(printf('%d %s: %s', (s:errors[0][0] + 1), bufname(s:errors[0][1]), s:errors[0][2]))
+	call ingo#msg#ErrorMsg(printf('%d %s: %s', (s:errors[0][0] + 1), bufname(s:errors[0][1]), s:errors[0][2]))
     elseif len(s:errors) > 1
-	let l:argumentNumbers = s:sort(ingocollections#unique(map(copy(s:errors), 'v:val[0] + 1')))
-	call s:ErrorMsg(printf('%d error%s in argument%s %s', len(s:errors), (len(s:errors) == 1 ? '' : 's'), (len(l:argumentNumbers) == 1 ? '' : 's'), join(l:argumentNumbers, ', ')))
+	let l:argumentNumbers = s:sort(ingo#collections#Unique(map(copy(s:errors), 'v:val[0] + 1')))
+	call ingo#msg#ErrorMsg(printf('%d error%s in argument%s %s', len(s:errors), (len(s:errors) == 1 ? '' : 's'), (len(l:argumentNumbers) == 1 ? '' : 's'), join(l:argumentNumbers, ', ')))
     endif
 
     let &more = l:save_more
@@ -248,25 +329,26 @@ function! s:InterpretRange( rangeExpr )
 	return []
     endtry
 endfunction
-function! ArgsAndMore#ArgdoWrapper( count, command )
-    if a:count == 0
-	call s:Argdo(a:command)
+function! ArgsAndMore#ArgdoWrapper( isNoRangeGiven, command, postCommand )
+    if a:isNoRangeGiven
+	call s:Argdo(a:command, a:postCommand)
     else
 	try
-	    let l:range = matchstr(histget('cmd', -1), '\%(^\||\)\s*\zs[^|]\+\ze\s*A\%[rgdo] ')
+	    let l:range = matchstr(histget('cmd', -1), '\C\%(^\||\)\s*\zs[^|]\+\ze\s*A\%[rgdo] ')
 	    if empty(l:range) | throw 'Invalid range' | endif
 	    let l:limits = s:InterpretRange(l:range)
 	    if len(l:limits) != 2 || l:limits[0] > l:limits[1] | throw 'Invalid range' | endif
-	    call s:ArgIterate(l:limits[0], l:limits[1], a:command)
+	    call s:ArgIterate(l:limits[0], l:limits[1], a:command, a:postCommand)
 	catch
-	    call s:ErrorMsg('Invalid range' . (empty(l:range) ? '' : ': ' . l:range))
+	    call ingo#msg#ErrorMsg('Invalid range' . (empty(l:range) ? '' : ': ' . l:range))
 	endtry
     endif
 endfunction
 
 function! ArgsAndMore#ArgdoErrors()
     let l:argidxByError = {}
-    for [l:argidx, l:bufnr, l:errorMsg] in s:errors
+    for l:error in s:errors
+	let [l:argidx, l:bufnr, l:errorMsg] = l:error[0:2]
 	let l:argidxByError[l:errorMsg] = get(l:argidxByError, l:errorMsg, []) + [[l:argidx, l:bufnr]]
     endfor
 
@@ -289,7 +371,7 @@ function! ArgsAndMore#ArgdoDeleteSuccessful()
 	let l:originalArgNum = l:endIdx - l:startIdx + 1
     endif
 
-    let l:argIdxDict = ingocollections#ToDict(map(copy(s:errors), 'v:val[0]'))
+    let l:argIdxDict = ingo#collections#ToDict(map(copy(s:errors), 'v:val[0]'))
     try
 	" To keep the indices valid, remove the arguments starting with the
 	" last argument.
@@ -299,18 +381,13 @@ function! ArgsAndMore#ArgdoDeleteSuccessful()
 	    endif
 	endfor
     catch /^Vim\%((\a\+)\)\=:E/
-	" v:exception contains what is normally in v:errmsg, but with extra
-	" exception source info prepended, which we cut away.
-	let v:errmsg = substitute(v:exception, '^Vim\%((\a\+)\)\=:', '', '')
-	echohl ErrorMsg
-	echomsg v:errmsg
-	echohl None
+	call ingo#msg#VimExceptionMsg()
     endtry
 
     echo printf('Deleted %d successfully processed from %d arguments', (l:originalArgNum - len(l:argIdxDict)), l:originalArgNum)
 endfunction
 
-function! ArgsAndMore#Bufdo( command )
+function! ArgsAndMore#Bufdo( command, postCommand )
     " Structure here like in s:Argdo().
 
     let l:originalBufNr = bufnr('')
@@ -324,19 +401,21 @@ function! ArgsAndMore#Bufdo( command )
     " switches (e.g. "E37: No write since last change" when :set nohidden and
     " the command modified, but didn't update the buffer).
     try
-	bufdo call s:ArgExecute(a:command)
+	let l:isEnableSyntax = s:IsInteractiveCommand(a:command)
+	bufdo call s:ArgExecute(a:command, a:postCommand, l:isEnableSyntax)
     catch /^Vim\%((\a\+)\)\=:E/
-	call add(s:errors, [-1, bufnr(''), s:MsgFromException(v:exception)])
-	call s:ExceptionMsg(v:exception)
+	call add(s:errors, [-1, bufnr(''), ingo#msg#MsgFromVimException()])
+	call ingo#msg#VimExceptionMsg()
     endtry
 
     silent! execute l:originalBufNr . 'buffer'
 
+    call s:ErrorsToQuickfix('bufdo')
     if len(s:errors) == 1
-	call s:ErrorMsg(printf('%d %s: %s', s:errors[0][1], bufname(s:errors[0][1]), s:errors[0][2]))
+	call ingo#msg#ErrorMsg(printf('%d %s: %s', s:errors[0][1], bufname(s:errors[0][1]), s:errors[0][2]))
     elseif len(s:errors) > 1
-	let l:bufferNumbers = s:sort(ingocollections#unique(map(copy(s:errors), 'v:val[1]')))
-	call s:ErrorMsg(printf('%d error%s in buffer%s %s', len(s:errors), (len(s:errors) == 1 ? '' : 's'), (len(l:bufferNumbers) == 1 ? '' : 's'), join(l:bufferNumbers, ', ')))
+	let l:bufferNumbers = s:sort(ingo#collections#Unique(map(copy(s:errors), 'v:val[1]')))
+	call ingo#msg#ErrorMsg(printf('%d error%s in buffer%s %s', len(s:errors), (len(s:errors) == 1 ? '' : 's'), (len(l:bufferNumbers) == 1 ? '' : 's'), join(l:bufferNumbers, ', ')))
     endif
 
     let &more = l:save_more
@@ -359,12 +438,7 @@ function! ArgsAndMore#ArgsFilter( filterExpression )
 	    endif
 	endfor
     catch /^Vim\%((\a\+)\)\=:E/
-	" v:exception contains what is normally in v:errmsg, but with extra
-	" exception source info prepended, which we cut away.
-	let v:errmsg = substitute(v:exception, '^Vim\%((\a\+)\)\=:', '', '')
-	echohl ErrorMsg
-	echomsg v:errmsg
-	echohl None
+	call ingo#msg#VimExceptionMsg()
     endtry
 
     if len(l:deletedArgs) == 0
@@ -378,12 +452,12 @@ function! ArgsAndMore#ArgsFilter( filterExpression )
 endfunction
 
 function! ArgsAndMore#ArgsNegated( bang, filePatternsString )
-    let l:filePatterns = ingofileargs#SplitAndUnescapeArguments(a:filePatternsString)
+    let l:filePatterns = ingo#cmdargs#file#SplitAndUnescape(a:filePatternsString)
 
     " First add all files in the passed directories, then remove the glob
     " matches. This allows to exclude multiple patterns from the same directory,
     " e.g. :ArgsNegated foo* bar*
-    let l:argDirspecGlobs = ingocollections#unique(map(copy(l:filePatterns), 'ingofile#CombineToFilespec(fnamemodify(v:val, ":h"), "*")'))
+    let l:argDirspecGlobs = ingo#collections#Unique(map(copy(l:filePatterns), 'ingo#fs#path#Combine(fnamemodify(v:val, ":h"), "*")'))
     " The globs passed to :argdelete must match the format listed in :args, so
     " modify all passed globs to be relative to the CWD.
     let l:argNegationGlobs = map(copy(l:filePatterns), 'fnamemodify(v:val, ":p:.")')
@@ -402,12 +476,7 @@ function! ArgsAndMore#ArgsNegated( bang, filePatternsString )
 	execute 'argdelete' join(l:argNegationGlobs)
 	execute 'first' . a:bang
     catch /^Vim\%((\a\+)\)\=:E/
-	" v:exception contains what is normally in v:errmsg, but with extra
-	" exception source info prepended, which we cut away.
-	let v:errmsg = substitute(v:exception, '^Vim\%((\a\+)\)\=:', '', '')
-	echohl ErrorMsg
-	echomsg v:errmsg
-	echohl None
+	call ingo#msg#VimExceptionMsg()
     endtry
 endfunction
 
@@ -416,7 +485,7 @@ endfunction
 function! ArgsAndMore#ArgsList( isBang, fileglob )
     let l:isFullPath = (! empty(a:fileglob) || a:isBang)
     if ! empty(a:fileglob)
-	let l:pattern = ingosearch#WildcardExprToSearchPattern(a:fileglob, '')
+	let l:pattern = ingo#regexp#FromWildcard(a:fileglob, '')
     endif
 
     echohl Title
@@ -439,7 +508,7 @@ endfunction
 
 function! ArgsAndMore#ArgsToQuickfix()
     silent doautocmd QuickFixCmdPre args | " Allow hooking into the quickfix update.
-    call setqflist(map(argv(), "{'filename': v:val, 'lnum': 1}"))
+	call setqflist(map(argv(), "{'filename': v:val, 'lnum': 1}"))
     silent doautocmd QuickFixCmdPost args | " Allow hooking into the quickfix update.
 endfunction
 
@@ -456,7 +525,7 @@ function! s:ExecuteWithoutWildignore( excommand, filespecs )
 "* EFFECTS / POSTCONDITIONS:
 "	? List of the procedure's effect on each external variable, control, or other element.
 "* INPUTS:
-"   a:excommand	    ex command to be invoked
+"   a:excommand	    Ex command to be invoked
 "   a:filespecs	    List of filespecs.
 "* RETURN VALUES:
 "   none
@@ -471,7 +540,7 @@ function! s:ExecuteWithoutWildignore( excommand, filespecs )
 endfunction
 function! ArgsAndMore#QuickfixToArgs( list, isArgAdd, count, bang )
     if empty(a:list)
-	call s:ErrorMsg('No items')
+	call ingo#msg#ErrorMsg('No items')
 	return
     endif
 
@@ -481,7 +550,7 @@ function! ArgsAndMore#QuickfixToArgs( list, isArgAdd, count, bang )
 
     let l:addedBufnrs = {}
     let l:filespecs = []
-    let l:existingArguments = ingocollections#ToDict(argv())
+    let l:existingArguments = ingo#collections#ToDict(argv())
     for l:bufnr in map(a:list, 'v:val.bufnr')
 	if has_key(l:addedBufnrs, l:bufnr)
 	    continue
@@ -505,4 +574,6 @@ function! ArgsAndMore#QuickfixToArgs( list, isArgAdd, count, bang )
     endif
 endfunction
 
+let &cpo = s:save_cpo
+unlet s:save_cpo
 " vim: set ts=8 sts=4 sw=4 noexpandtab ff=unix fdm=syntax :

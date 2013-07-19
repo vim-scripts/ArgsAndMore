@@ -37,6 +37,11 @@ USAGE							   *ArgsAndMore-usage*
 								      *:Bufdo*
 :Bufdo {cmd}		Execute {cmd} in each buffer in the buffer list, then
 			return back to the original one.
+			Any encountered errors are also put into the
+			|quickfix| list.
+								 *:BufdoWrite*
+:BufdoWrite {cmd}	Execute {cmd} in each buffer in the buffer list and
+			automatically persist any changes (|:update|).
 								      *:Windo*
 :Windo {cmd}		Execute {cmd} in each window, then return back to the
 			original one.
@@ -53,7 +58,7 @@ USAGE							   *ArgsAndMore-usage*
 								      *:Argdo*
 :Argdo {cmd}		Execute {cmd} for each file in the argument list, then
 			return back to the original file and argument.
-:[range]Argdo {cmd}	Execute {cmd} for the [range] of indices from the
+:{range}Argdo {cmd}	Execute {cmd} for the {range} of indices from the
 			argument list, then return back to the original file
 			and argument.
 			For example, to execute {cmd} on the remaining
@@ -65,6 +70,12 @@ USAGE							   *ArgsAndMore-usage*
 			summary will be printed.
 			To work on the errors / arguments with errors, you can
 			use |:ArgdoErrors| and |:ArgdoDeleteSuccessful|.
+			Also, any encountered errors are put into the
+			|quickfix| list.
+								 *:ArgdoWrite*
+:ArgdoWrite {cmd}	Execute {cmd} in each buffer in the argument list and
+			automatically persist any changes (|:update|).
+
 								*:ArgdoErrors*
 :ArgdoErrors		List all error messages that occurred during the last
 			|:Argdo| command, and for each unique error, print the
@@ -117,6 +128,8 @@ To uninstall, use the |:RmVimball| command.
 DEPENDENCIES					    *ArgsAndMore-dependencies*
 
 - Requires Vim 7.0 or higher.
+- Requires the |ingo-library.vim| plugin (vimscript #4433), version 1.007 or
+  higher.
 
 ==============================================================================
 CONFIGURATION					   *ArgsAndMore-configuration*
@@ -129,6 +142,15 @@ delay, it may or may not abort.) To also persist any changes to the buffer,
 you could use: >
     let g:ArgsAndMore_AfterCommand = 'update | sleep 100m'
 <
+				     *g:ArgsAndMore_InteractiveCommandPattern*
+During :argdo, syntax highlighting of freshly loaded buffers is turned off for
+performance reasons, but for interactive commands, it is useful to have syntax
+highlighting. Therefore, the |:Argdo| and |:Bufdo| commands detect interactive
+commands and overrule the default syntax suppression then. By default, this
+applies to the |:substitute| command with the |:s_c| flag; you can adapt the
+|pattern| to match other commands, too: >
+    let g:ArgsAndMore_InteractiveCommandPattern = '...'
+<
 ==============================================================================
 LIMITATIONS					     *ArgsAndMore-limitations*
 
@@ -140,6 +162,26 @@ IDEAS							   *ArgsAndMore-ideas*
 
 ==============================================================================
 HISTORY							 *ArgsAndMore-history*
+
+1.20	19-Jul-2013
+- Add dependency to ingo-library (vimscript #4433). *** You need to separately
+  install ingo-library (vimscript #4433) version 1.007 (or higher)! ***
+- ENH: Add :ArgdoWrite and :BufdoWrite variants that also perform an automatic
+  :update.
+- ENH: Add errors from :Argdo and :BufDo to the quickfix list to allow easier
+  rework.
+- Avoid script errors when using :Argdo 3s/foo/bar
+- Minor: Change :Argdo[Write] -range=-1 default check to use <count>, which
+  maintains the actual -1 default, and therefore also delivers correct results
+  when on line 1.
+- ENH: Enable syntax highlighting on :Argdo / :Bufdo on freshly loaded buffers
+  when the command is an interactive one (:s///c, according to
+  g:ArgsAndMore_InteractiveCommandPattern), but for performance reasons not in
+  the general case.
+- In :{range}Argdo, emulate the behavior of the built-in :argdo to disable
+  syntax highlighting during to speed up the iteration, but consider our own
+  enhancement, the exception for interactive commands.
+- Minor: Make matchstr() robust against 'ignorecase'.
 
 1.11	15-Jan-2013
 FIX: Factor out s:sort() and also use numerical sort in the one missed case.
@@ -165,7 +207,7 @@ Started development.
 
 ==============================================================================
 Copyright: (C) 2012-2013 Ingo Karkat
-The VIM LICENSE applies to this script; see |copyright|.
+The VIM LICENSE applies to this plugin; see |copyright|.
 
 Maintainer:	Ingo Karkat <ingo@karkat.de>
 ==============================================================================
