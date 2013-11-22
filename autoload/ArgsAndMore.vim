@@ -1,12 +1,13 @@
 " ArgsAndMore.vim: Apply commands to multiple buffers and manage the argument list.
 "
 " DEPENDENCIES:
-"   - escapings.vim autoload script
+"   - ingo/buffer.vim autoload script
 "   - ingo/cmdargs/file.vim autoload script
 "   - ingo/collections.vim autoload script
+"   - ingo/compat.vim autoload script
 "   - ingo/fs/path.vim autoload script
 "   - ingo/msg.vim autoload script
-"   - ingo/regexp.vim autoload script
+"   - ingo/regexp/fromwildcard.vim autoload script
 "
 " Copyright: (C) 2012-2013 Ingo Karkat
 "   The VIM LICENSE applies to this script; see ':help copyright'.
@@ -14,6 +15,13 @@
 " Maintainer:	Ingo Karkat <ingo@karkat.de>
 "
 " REVISION	DATE		REMARKS
+"   1.21.014	26-Oct-2013	Move from the simplistic
+"				ingo#regexp#FromWildcard() to
+"				ingo#regexp#fromwildcard#Convert() to handle all
+"				wildcards.
+"   1.21.013	07-Oct-2013	Don't just check for 'buftype' of "nofile"; also
+"				exclude "nowrite", quickfix and help buffers.
+"   1.21.012	08-Aug-2013	Move escapings.vim into ingo-library.
 "   1.20.011	14-Jun-2013	Minor: Make matchstr() robust against
 "				'ignorecase'.
 "   1.20.010	01-Jun-2013	ENH: Enable syntax highlighting on :Argdo /
@@ -169,7 +177,7 @@ function! s:EnableSyntaxHighlightingForInteractiveCommands( command )
     \   exists('g:syntax_on') &&
     \   ! exists('b:current_syntax') &&
     \   ! empty(&l:filetype) &&
-    \   &l:buftype !=# 'nofile' &&
+    \   ingo#buffer#IsPersisted() &&
     \   s:IsSyntaxSuppressed()
 	let l:save_eventignore = &eventignore
 	set eventignore-=Syntax
@@ -471,7 +479,7 @@ function! ArgsAndMore#ArgsNegated( bang, filePatternsString )
 	" XXX: Need to issue a dummy :chdir to convert relative args
 	" "../other/path" to a path relative to the CWD "/real/other/path".
 	let l:chdirCommand = (haslocaldir() ? 'lchdir!' : 'chdir!')
-	execute l:chdirCommand escapings#fnameescape(getcwd())
+	execute l:chdirCommand ingo#compat#fnameescape(getcwd())
 
 	execute 'argdelete' join(l:argNegationGlobs)
 	execute 'first' . a:bang
@@ -485,7 +493,7 @@ endfunction
 function! ArgsAndMore#ArgsList( isBang, fileglob )
     let l:isFullPath = (! empty(a:fileglob) || a:isBang)
     if ! empty(a:fileglob)
-	let l:pattern = ingo#regexp#FromWildcard(a:fileglob, '')
+	let l:pattern = ingo#regexp#fromwildcard#Convert(a:fileglob)
     endif
 
     echohl Title
@@ -533,7 +541,7 @@ function! s:ExecuteWithoutWildignore( excommand, filespecs )
     let l:save_wildignore = &wildignore
     set wildignore=
     try
-	execute a:excommand join(map(copy(a:filespecs), 'escapings#fnameescape(v:val)'), ' ')
+	execute a:excommand join(map(copy(a:filespecs), 'ingo#compat#fnameescape(v:val)'), ' ')
     finally
 	let &wildignore = l:save_wildignore
     endtry
