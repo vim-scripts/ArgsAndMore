@@ -56,6 +56,13 @@ USAGE
 
 :ArgdoWrite {cmd}       Execute {cmd} in each buffer in the argument list and
                         automatically persist any changes (:update).
+:ArgdoConfirmWrite {cmd}
+                        Like :ArgdoWrite, but confirm each write, allowing
+                        to review the automatically applied changes of {cmd}
+                        before persisting them. When you quit the argument
+                        processing before the last argument, this will not
+                        return to the original file (to make it easier to
+                        process the remaining arguments again).
 
 :ArgdoErrors            List all error messages that occurred during the last
                         :Argdo command, and for each unique error, print the
@@ -88,3 +95,11 @@ USAGE
 
 :LListToArgs            Convert the files in the window's location list to
 :[count]LListToArgsAdd  arguments.
+
+:CList[!], :LList[!]    List each file that has listed errors in the quickfix
+                        / location list in a neat list. With [!], expand all
+                        to absolute filespecs.
+:CList[!] {glob}        List each file that has listed errors in the quickfix
+:LList[!] {glob}        / location list that matches (with [!]: does not
+                        match) {glob} in a neat list. Matching and printing is
+                        done to the full filespec.
