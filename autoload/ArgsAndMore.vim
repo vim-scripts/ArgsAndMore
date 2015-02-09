@@ -10,12 +10,41 @@
 "   - ingo/query/substitute.vim autoload script
 "   - ingo/regexp/fromwildcard.vim autoload script
 "
-" Copyright: (C) 2012-2014 Ingo Karkat
+" Copyright: (C) 2012-2015 Ingo Karkat
 "   The VIM LICENSE applies to this script; see ':help copyright'.
 "
 " Maintainer:	Ingo Karkat <ingo@karkat.de>
 "
 " REVISION	DATE		REMARKS
+"   2.00.020	30-Jan-2015	Expose s:Argdo() and add a:range argument for
+"				the :Argdo variant that can use the
+"				-addr=arguments attribute.
+"				ArgsAndMore#ArgdoWrapper() and s:ArgIterate()
+"				aren't needed any more.
+"				Add a:range argument for all :argdo / :bufdo /
+"				:tabdo / :windo invocations to support the new
+"				-addr attribute.
+"				Switch to
+"				ingo#regexp#fromwildcard#AnchoredToPathBoundaries()
+"				to correctly enforce path boundaries in
+"				:ArgsList {glob}.
+"   1.23.019	29-Jan-2015	Vim 7.4.605 makes the alternate file register "#
+"				writable, so we don't need to revisit the buffer.
+"				FIX: :Argdo may fail to restore the original
+"				buffer. Ensure that argidx() actually points to
+"				valid argument; this may not be the case when
+"				arguments have only been :argadd'ed, but not
+"				visited yet.
+"   1.23.018	27-Jan-2015	ENH: Keep previous (last accessed) window on
+"				:Windo and :Winbufdo. Thanks to Daniel Hahler
+"				for the patch.
+"				ENH: Keep alternate buffer (#) on :Argdo and
+"				:Bufdo commands. Thanks to Daniel Hahler for the
+"				suggestion.
+"				Handle modified buffers together with :set
+"				nohidden when restoring the original buffer
+"				after :Argdo and :Bufdo by using :hide.
+"   1.23.017	05-May-2014	Use ingo#msg#WarningMsg().
 "   1.22.016	24-Mar-2014	Also catch custom exceptions and errors caused
 "				by the passed user command (or configured
 "				post-command).
@@ -53,7 +82,7 @@
 "				:Bufdo.
 "   1.12.007	15-Mar-2013	Use ingo/msg.vim error functions. Obsolete
 "				s:ErrorMsg() and s:MsgFromException().
-"				ENH: Add errors from :Argdo and :BufDo to the
+"				ENH: Add errors from :Argdo and :Bufdo to the
 "				quickfix list to allow easier rework.
 "   1.12.006	21-Feb-2013	Move ingocollections.vim to ingo-library.
 "   1.11.005	15-Jan-2013	FIX: Factor out s:sort() and also use numerical
@@ -99,18 +128,20 @@ function! s:Execute( command )
     call s:AfterExecute()
 endfunction
 
-function! ArgsAndMore#Windo( command )
+function! ArgsAndMore#Windo( range, command )
     " By entering a window, its height is potentially increased from 0 to 1 (the
     " minimum for the current window). To avoid any modification, save the window
     " sizes and restore them after visiting all windows.
     let l:originalWindowLayout = winrestcmd()
 	let l:originalWinNr = winnr()
-	    windo call s:Execute(a:command)
+	let l:previousWinNr = winnr('#') ? winnr('#') : 1
+	    execute a:range 'windo call s:Execute(a:command)'
+	execute l:previousWinNr . 'wincmd w'
 	execute l:originalWinNr . 'wincmd w'
     silent! execute l:originalWindowLayout
 endfunction
 
-function! ArgsAndMore#Winbufdo( command )
+function! ArgsAndMore#Winbufdo( range, command )
     let l:buffers = []
 
     " By entering a window, its height is potentially increased from 0 to 1 (the
@@ -118,43 +149,74 @@ function! ArgsAndMore#Winbufdo( command )
     " sizes and restore them after visiting all windows.
     let l:originalWindowLayout = winrestcmd()
 	let l:originalWinNr = winnr()
+	let l:previousWinNr = winnr('#') ? winnr('#') : 1
 
-	    windo
-	    \   if index(l:buffers, bufnr('')) == -1 |
-	    \       call add(l:buffers, bufnr('')) |
-	    \       call s:Execute(a:command)
-	    \   endif
+	    execute a:range 'windo'
+	    \   'if index(l:buffers, bufnr('')) == -1 |'
+	    \       'call add(l:buffers, bufnr('')) |'
+	    \       'call s:Execute(a:command)'
+	    \   'endif'
 
+	execute l:previousWinNr . 'wincmd w'
 	execute l:originalWinNr . 'wincmd w'
     silent! execute l:originalWindowLayout
 endfunction
 
-function! ArgsAndMore#Tabdo( command )
+function! ArgsAndMore#Tabdo( range, command )
     let l:originalTabNr = tabpagenr()
-	tabdo call s:Execute(a:command)
+	execute a:range 'tabdo call s:Execute(a:command)'
     execute l:originalTabNr . 'tabnext'
 endfunction
 
-function! ArgsAndMore#Tabwindo( command )
+function! ArgsAndMore#Tabwindo( range, command )
     let l:originalTabNr = tabpagenr()
-	tabdo call ArgsAndMore#Windo(a:command)
+	execute a:range 'tabdo call ArgsAndMore#Windo("", a:command)'
     execute l:originalTabNr . 'tabnext'
 endfunction
 
 
+function! s:JoinCommands( commands )
+    return join(
+    \   map(a:commands, '"hide " . v:val'),
+    \   '|'
+    \)
+endfunction
+function! s:RestoreAlternateBuffer( restoreCommands )
+    if bufnr('#') != -1
+	if v:version == 704 && has('patch605') || v:version > 704
+	    call add(a:restoreCommands, 'let @# = ' . bufnr('#'))
+	else
+	    " Since the # register is read-only, we have to briefly revisit the
+	    " buffer before the last command that restores the original buffer.
+	    call insert(a:restoreCommands, bufnr('#') . 'buffer', -1)
+	endif
+    endif
+endfunction
+function! s:BufferListRestoreCommand()
+    let l:restoreCommands = [bufnr('') . 'buffer']
+    call s:RestoreAlternateBuffer(l:restoreCommands)
+
+    return s:JoinCommands(l:restoreCommands)
+endfunction
 function! s:ArgumentListRestoreCommand()
+    let l:restoreCommands = []
+
     " Restore the current argument index.
-    let l:restoreCommand = (argidx() + 1) . 'argument'
+    if argidx() < argc()    " The index can be beyond if arguments have been :argadd'ed, but not yet visited.
+	call add(l:restoreCommands, (argidx() + 1) . 'argument')
+    endif
 
     " When the current file isn't in the argument list, restore that buffer,
     " too.
     " argidx() doesn't tell whether we're in the N'th file of the argument list,
     " or in an unrelated file. Need to compare the actual filenames to be sure.
     if argc() == 0 || argv(argidx()) !=# expand('%')
-	let l:restoreCommand .= '|' . bufnr('') . 'buffer'
+	call add(l:restoreCommands, bufnr('') . 'buffer')
     endif
 
-    return l:restoreCommand
+    call s:RestoreAlternateBuffer(l:restoreCommands)
+"****D echomsg '****' string(l:restoreCommands)
+    return s:JoinCommands(l:restoreCommands)
 endfunction
 let s:errors = []
 function! s:ErrorToQuickfixEntry( error )
@@ -232,7 +294,7 @@ function! s:ArgExecute( command, postCommand, isEnableSyntax )
 
     call s:AfterExecute()
 endfunction
-function! s:Argdo( command, postCommand )
+function! ArgsAndMore#Argdo( range, command, postCommand )
     let l:restoreCommand = s:ArgumentListRestoreCommand()
 
     " Temporarily turn off 'more', as this interferes with the "automated batch
@@ -258,7 +320,7 @@ function! s:Argdo( command, postCommand )
 	" iteration will be aborted. (We can't use :silent! because we want to
 	" see the error message.)
 	let l:isEnableSyntax = s:IsInteractiveCommand(a:command)
-	argdo call s:ArgExecute(a:command, a:postCommand, l:isEnableSyntax)
+	execute a:range . 'argdo call s:ArgExecute(a:command, a:postCommand, l:isEnableSyntax)'
     catch /^Vim\%((\a\+)\)\=:/
 	call add(s:errors, [argidx(), bufnr(''), ingo#msg#MsgFromVimException()])
 	call ingo#msg#VimExceptionMsg()
@@ -284,8 +346,9 @@ function! s:Argdo( command, postCommand )
     " error message.
     let &more = l:save_more
 endfunction
-function! s:ArgIterate( startIdx, endIdx, command, postCommand )
-    " Structure here like in s:Argdo().
+if v:version < 704 || v:version == 704 && ! has('patch530')
+function! s:ArgIterate( startArg, endArg, command, postCommand )
+    " Structure here like in ArgsAndMore#Argdo().
 
     let l:restoreCommand = s:ArgumentListRestoreCommand()
 
@@ -300,19 +363,19 @@ function! s:ArgIterate( startIdx, endIdx, command, postCommand )
     let l:save_more = &more
     set nomore
 
-    let s:range = [a:startIdx, a:endIdx]
+    let s:range = [a:startArg, a:endArg]
     let s:errors = []
     let l:isAborted = 0
 
     try
-	for l:idx in range(a:startIdx, a:endIdx)
+	for l:arg in range(a:startArg, a:endArg)
 	    " This is not :argdo; the printed error messages will be overwritten
 	    " by the messages resulting from the switch to the next argument. To
 	    " avoid this and keep both file changes as well as error messages
 	    " interspersed on the screen, capture the output from the file
 	    " change and :echo it ourselves.
 	    redir => l:nextArgumentOutput
-		silent execute l:idx . 'argument'
+		silent execute l:arg . 'argument'
 	    redir END
 	    let l:nextArgumentOutput = substitute(l:nextArgumentOutput, '^\_s*', '', '')
 	    if ! empty(l:nextArgumentOutput)
@@ -372,7 +435,7 @@ function! s:InterpretRange( rangeExpr )
 endfunction
 function! ArgsAndMore#ArgdoWrapper( isNoRangeGiven, command, postCommand )
     if a:isNoRangeGiven
-	call s:Argdo(a:command, a:postCommand)
+	call ArgsAndMore#Argdo('', a:command, a:postCommand)
     else
 	try
 	    let l:range = matchstr(histget('cmd', -1), '\C\%(^\||\)\s*\zs[^|]\+\ze\s*A\%[rgdo] ')
@@ -385,6 +448,7 @@ function! ArgsAndMore#ArgdoWrapper( isNoRangeGiven, command, postCommand )
 	endtry
     endif
 endfunction
+endif
 
 function! ArgsAndMore#ArgdoErrors()
     let l:argidxByError = {}
@@ -428,10 +492,10 @@ function! ArgsAndMore#ArgdoDeleteSuccessful()
     echo printf('Deleted %d successfully processed from %d arguments', (l:originalArgNum - len(l:argIdxDict)), l:originalArgNum)
 endfunction
 
-function! ArgsAndMore#Bufdo( command, postCommand )
-    " Structure here like in s:Argdo().
+function! ArgsAndMore#Bufdo( range, command, postCommand )
+    " Structure here like in ArgsAndMore#Argdo().
 
-    let l:originalBufNr = bufnr('')
+    let l:restoreCommand = s:BufferListRestoreCommand()
 
     let l:save_more = &more
     set nomore
@@ -443,13 +507,13 @@ function! ArgsAndMore#Bufdo( command, postCommand )
     " the command modified, but didn't update the buffer).
     try
 	let l:isEnableSyntax = s:IsInteractiveCommand(a:command)
-	bufdo call s:ArgExecute(a:command, a:postCommand, l:isEnableSyntax)
+	execute a:range 'bufdo call s:ArgExecute(a:command, a:postCommand, l:isEnableSyntax)'
     catch /^Vim\%((\a\+)\)\=:/
 	call add(s:errors, [-1, bufnr(''), ingo#msg#MsgFromVimException()])
 	call ingo#msg#VimExceptionMsg()
     endtry
 
-    silent! execute l:originalBufNr . 'buffer'
+    silent! execute l:restoreCommand
 
     call s:ErrorsToQuickfix('bufdo')
     if len(s:errors) == 1
@@ -483,10 +547,7 @@ function! ArgsAndMore#ArgsFilter( filterExpression )
     endtry
 
     if len(l:deletedArgs) == 0
-	let v:warningmsg = 'No arguments filtered out'
-	echohl WarningMsg
-	echomsg v:warningmsg
-	echohl None
+	call ingo#msg#WarningMsg('No arguments filtered out')
     else
 	echo printf('Deleted %d/%d: %s', len(l:deletedArgs), l:originalArgNum, join(l:deletedArgs))
     endif
@@ -526,7 +587,7 @@ endfunction
 function! s:List( files, currentIdx, isBang, fileglob )
     let l:isFullPath = (! empty(a:fileglob) || a:isBang)
     if ! empty(a:fileglob)
-	let l:pattern = ingo#regexp#fromwildcard#Convert(a:fileglob)
+	let l:pattern = ingo#regexp#fromwildcard#AnchoredToPathBoundaries(a:fileglob)
     endif
 
     let l:hasPrintedTitle = 0
@@ -549,14 +610,22 @@ function! s:List( files, currentIdx, isBang, fileglob )
 	echo (l:fileIdx == a:currentIdx ? '*' : ' ') . printf('%3d', l:fileIdx + 1) . "\t" . l:filespec
     endfor
 endfunction
-function! ArgsAndMore#ArgsList( isBang, fileglob )
-    call s:List(argv(), argidx(), a:isBang, a:fileglob)
+function! ArgsAndMore#ArgsList( startArg, endArg, isBang, fileglob )
+    call s:List(
+    \   argv()[a:startArg - 1 : a:endArg - 1],
+    \   argidx() - a:startArg + 1,
+    \   a:isBang,
+    \   a:fileglob
+    \)
 endfunction
 
 
-function! ArgsAndMore#ArgsToQuickfix()
+function! ArgsAndMore#ArgsToQuickfix( startArg, endArg )
     silent doautocmd QuickFixCmdPre args | " Allow hooking into the quickfix update.
-	call setqflist(map(argv(), "{'filename': v:val, 'lnum': 1}"))
+	call setqflist(map(
+	\   argv()[a:startArg - 1 : a:endArg - 1],
+	\   "{'filename': v:val, 'lnum': 1}"
+	\))
     silent doautocmd QuickFixCmdPost args | " Allow hooking into the quickfix update.
 endfunction
 
