@@ -106,3 +106,20 @@ USAGE
 :LList[!] {glob}        / location list that matches (with [!]: does not
                         match) {glob} in a neat list. Matching and printing is
                         done to the full filespec.
+
+:[range]CDoEntry {cmd}  Execute {cmd} on each entry in the quickfix /
+:[range]LDoEntry {cmd}  location list (limited to buffers in [range]).
+
+:[range]CDoFile {cmd}   Execute {cmd} once on each file that appears in the
+:[range]LDoFile {cmd}   quickfix / location list (limited to buffers in
+                        [range]).
+
+:[range]CDoFixEntry {cmd}
+:[range]LDoFixEntry {cmd}
+                        Execute {cmd} on each entry in the quickfix / location
+                        list (limited to buffers in [range]). If the {cmd}
+                        does not abort and changes the buffer (i.e. increases
+                        b:changedtick), that entry is removed from the
+                        quickfix / location list. Else, the original entry is
+                        augmented with error information. (Entries for buffers
+                        outside [range] are kept as-is.)
